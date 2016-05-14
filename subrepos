@@ -1,0 +1,7 @@
+# Hash listing the subrepos this one depends on
+# Structure of each element: ["directory name"]="path to repo"
+# i.e.: REPOS=( ["sub1"]="git@gitolite:sub1" ["sub2"]="git@gitolite:sub2" )
+
+declare -A REPOS
+# REPOS=( ["sub1"]="git@gitolite:sub1" ["sub2"]="git@gitolite:sub2" )
+REPOS["subsub"]="https://github.com/jmnavarrol/simplest-git-subrepos-subsub.git"  # The 'subsub' repo
