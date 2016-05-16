@@ -5,7 +5,7 @@
 
 # GLOBALS
 readonly REPOLIST_FILE='subrepos'  # the list of "subrepos" to clone is whitin this file
-declare -A ALL_SUBREPOS            # hash to collect all currently known subrepos
+declare -A ALL_SUBREPOS            # hash to recursively collect all known subrepos
 
 readonly SCRIPT_NAME=`basename ${BASH_SOURCE[0]}`  # Script's name
 readonly GETOPT=/usr/bin/getopt
@@ -39,7 +39,7 @@ check_enviro() {
 }
 
 
-# Finds subrepos and lists them
+# Finds subrepos and collects them in a hash
 search_subrepos(){
 # Make sure the global "subrepos superlist" is clean
 	unset $ALL_SUBREPOS
@@ -53,7 +53,7 @@ search_subrepos(){
 		for dir in "${!REPOS[@]}"; do
 			ALL_SUBREPOS["${rel_path}/${dir}"]="${REPOS[$dir]}"
 		done
-		unset REPOS  # clean back the REPO hash
+		unset REPOS  # clean back the REPO hash once read
 	done
 }
 
@@ -71,7 +71,7 @@ list_subrepos() {
 clone() {
 # make sure the list of subrepos is up to date
 	search_subrepos
-# find all defined subrepos and clone them if needed
+# find all defined subrepos and clone them as needed
 	for dir in "${!ALL_SUBREPOS[@]}"; do
 		if [ ! -d "$dir" ]; then
 			echo "$dir doesn't exist: about to clone it from ${ALL_SUBREPOS[$dir]}..."
@@ -84,30 +84,46 @@ clone() {
 
 # Changes the active branch on all subrepos to be the same as the (relative) top one
 checkout(){
+pending_actions=0
 # make sure the list of subrepos is up to date
 	search_subrepos
 # get current branch
-	current_branch=`git symbolic-ref --short HEAD`
+	target_branch=`git symbolic-ref --short HEAD`
 	echo "Current branch is ${current_branch}"
 # list branches on subrepos
 	for dir in "${!ALL_SUBREPOS[@]}"; do
 	# the subrepo might not be checked out yet.  Test and act accordingly
-		[ -d "$dir" ] || (clone)
+	# (activate 'pending_actions' since this can rise new subrepos)
+		[ -d "$dir" ] || pending_actions=1 && clone
 		# since we need to cd into the subrepo's root, let's do it within a subshell
-		export dir current_branch
+		export dir target_branch pending_actions
 		(
 			cd $dir
 			local_branch=`git symbolic-ref --short HEAD`
-			if [ "$local_branch" != "$current_branch" ]; then
+			if [ "$local_branch" != "$target_branch" ]; then
+			# Does the remote branch by that name exists?  If not, bail out (too dangerous to try anything)
+				$GIT ls-remote --heads --quiet --exit-code origin "$target_branch" > /dev/null
+				if [ $? != 0 ]; then
+					echo "ERROR: branch $target_branch doesn't exist at remote end on subrepo $dir."
+					echo "Cowardly bailing out as I don't know what I should do."
+					exit 1
+				fi
+			# Everything seems OK: let's checkout the requested branch
 				echo -e "branch ${local_branch} at ${dir} doesn't match: about to change it..."
-			# check if a local branch by the required name already exists.  If not, create it
-				$GIT show-ref --verify --quiet "refs/heads/${current_branch}" || git_opt="-b"
-				$GIT checkout $git_opt "$current_branch" "origin/${current_branch}"
-			# this checkout might make new subrepos arise, rinse and repeat
-				[ -x ./${SCRIPT_NAME} ] && ./$SCRIPT_NAME --checkout
+				# check if a local branch by the required name already exists.  If not, create it
+				$GIT show-ref --verify --quiet "refs/heads/${target_branch}" || git_opt="-t origin/"
+				# finally, the checkout itself
+				# (activate 'pending_actions' since this can rise new subrepos)
+				pending_actions=1 && $GIT checkout ${git_opt}"$target_branch"
 			fi
 		)
+		if [ $? != 0 ]; then
+			echo "ERROR: Look for errors above and correct before running the script again."
+			exit 1
+		fi
 	done
+# new subrepos might have appeared; rinse and repeat if that's the case
+	[ $pending_actions != 0 ] && checkout
 }
 
 
