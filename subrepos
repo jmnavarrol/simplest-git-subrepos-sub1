@@ -1,0 +1,5 @@
+---
+# Yaml listing the subrepos this one depends on
+subrepos:
+- path: 'subsub'
+  repo: 'git@github.com:jmnavarrol/simplest-git-subrepos-subsub.git'
